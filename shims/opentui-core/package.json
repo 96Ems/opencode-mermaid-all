@@ -1,0 +1,12 @@
+{
+  "name": "@opentui/core",
+  "version": "0.5.14",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./testing": "./testing.js",
+    "./runtime-plugin": "./runtime-plugin.js",
+    "./runtime-plugin-support": "./runtime-plugin-support.js",
+    "./runtime-plugin-support/configure": "./runtime-plugin-support-configure.js"
+  }
+}

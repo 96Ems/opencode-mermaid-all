@@ -1,0 +1,24 @@
+{
+  "name": "opencode-mermaid-all",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Render every Mermaid diagram type in the OpenCode v2 TUI.",
+  "keywords": ["opencode", "opencode-plugin", "opentui", "mermaid", "tui", "diagram", "ascii"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/96Ems/opencode-mermaid-all"
+  },
+  "scripts": {
+    "test": "bun test/render.ts"
+  },
+  "dependencies": {
+    "entities": "7.0.1",
+    "string-width": "^7.2.0"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "2.0.22",
+    "@opentui/core": "0.5.14"
+  }
+}
