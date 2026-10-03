@@ -8,6 +8,9 @@ import { findFamily } from "./families/index.js"
 import { flowchartRouteMotions, sankeyRouteMotions, sequenceRouteMotions } from "./motion-design.js"
 import { resolvePalette, type DiagramPalette } from "./palette.js"
 import { DiagramRenderable } from "./renderable.js"
+import { parseMermaidGitGraphDiagram } from "../vendor/merman/gitgraph/parser.js"
+import { drawGitGraphDiagramGrid } from "../vendor/merman/gitgraph/drawing.js"
+import { renderDiagramGridStyledTextByStyle } from "../vendor/merman/core/render-grid.js"
 
 export interface ThemeSource {
   theme: unknown
@@ -65,9 +68,59 @@ function animateVendored(renderable: unknown, palette: DiagramPalette, motions: 
 }
 
 /**
+ * Render a gitGraph diagram with per-branch colors from our palette.
+ * The vendored engine renders all branches in the same muted color; we override
+ * branch0..branch7 with distinct accent colors.
+ */
+function renderGitGraphWithBranchColors(
+  source: string,
+  palette: DiagramPalette,
+  ctx: RenderContext,
+): TextRenderable | undefined {
+  try {
+    const diagram = parseMermaidGitGraphDiagram(source)
+    const grid = drawGitGraphDiagramGrid(diagram)
+
+    // Build foreground colors for each branch style.
+    // Use categorical palette colors if available, otherwise fall back to
+    // accent/accent2/warn/ok/info.
+    const branchColors = [
+      palette.accent,
+      palette.accent2,
+      palette.warn,
+      palette.ok,
+      palette.info,
+      palette.text,
+      palette.muted,
+      palette.dim,
+    ]
+
+    const foregrounds: Record<string, TextRenderable["content"]["chunks"][0]["fg"]> = {
+      commit: palette.accent,
+      merge: palette.accent2,
+      highlight: palette.warn,
+      reverse: palette.info,
+      label: palette.text,
+    }
+    for (let i = 0; i < 8; i += 1) {
+      foregrounds[`branch${i}`] = branchColors[i % branchColors.length]
+    }
+
+    const styledText = renderDiagramGridStyledTextByStyle(grid, foregrounds, undefined, {
+      trimBottom: true,
+    })
+
+    return new TextRenderable(ctx, { content: styledText })
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Build the `mermaid` code-block renderer: the vendored OpenCode engine handles
- * flowchart/sequence/state/gantt/gitGraph/timeline, and the extra families here
- * handle everything else. Returning `undefined` falls back to the source block.
+ * flowchart/sequence/state/gantt/timeline, and the extra families here
+ * handle everything else (including gitGraph with custom branch colors).
+ * Returning `undefined` falls back to the source block.
  */
 export function createMermaidAllRenderer(
   ctx: RenderContext,
@@ -82,6 +135,15 @@ export function createMermaidAllRenderer(
   })
 
   return (token, tokenContext) => {
+    // Handle gitGraph ourselves to give each branch its own color.
+    const kind = detectMermaidDiagram(token.text)
+    if (kind === "gitGraph") {
+      const palette = resolvePalette(source().theme, source().mode)
+      const handled = renderGitGraphWithBranchColors(token.text, palette, ctx)
+      if (handled) return handled
+      // Fall through to vendored if our rendering fails.
+    }
+
     const handled = vendored(token, tokenContext)
     if (handled) {
       try {

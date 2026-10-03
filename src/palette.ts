@@ -19,6 +19,10 @@ export interface DiagramPalette {
 const FALLBACK_TEXT = RGBA.fromInts(228, 239, 232, 255)
 const FALLBACK_MUTED = RGBA.fromInts(140, 166, 156, 255)
 const FALLBACK_ACCENT = RGBA.fromInts(134, 225, 200, 255)
+const FALLBACK_ACCENT2 = RGBA.fromInts(230, 177, 126, 255)
+const FALLBACK_WARN = RGBA.fromInts(225, 134, 166, 255)
+const FALLBACK_OK = RGBA.fromInts(190, 210, 120, 255)
+const FALLBACK_INFO = RGBA.fromInts(126, 189, 230, 255)
 const FALLBACK_ACTIVE_BG = RGBA.fromInts(29, 52, 46, 255)
 
 function asRgba(value: unknown): RGBA | undefined {
@@ -31,11 +35,11 @@ const FALLBACK_PALETTE: DiagramPalette = {
   border: FALLBACK_MUTED,
   dim: FALLBACK_MUTED,
   accent: FALLBACK_ACCENT,
-  accent2: FALLBACK_ACCENT,
+  accent2: FALLBACK_ACCENT2,
   activeBg: FALLBACK_ACTIVE_BG,
-  warn: FALLBACK_ACCENT,
-  ok: FALLBACK_ACCENT,
-  info: FALLBACK_ACCENT,
+  warn: FALLBACK_WARN,
+  ok: FALLBACK_OK,
+  info: FALLBACK_INFO,
 }
 
 /**
@@ -62,20 +66,19 @@ export function resolvePalette(theme: unknown, mode: "dark" | "light"): DiagramP
     const dim = blendColor(text, subdued, 0.82) ?? FALLBACK_MUTED
 
     const categorical = Array.isArray(tokens.categorical) ? tokens.categorical : []
-    const active = (entry: unknown): RGBA => {
-      if (!entry || typeof entry !== "object") return FALLBACK_ACCENT
+    const active = (entry: unknown): RGBA | undefined => {
+      if (!entry || typeof entry !== "object") return undefined
       const record = entry as Record<number, unknown>
       return (
         asRgba(record[mode === "dark" ? 300 : 700]) ??
-        asRgba(record[mode === "dark" ? 200 : 800]) ??
-        FALLBACK_ACCENT
+        asRgba(record[mode === "dark" ? 200 : 800])
       )
     }
     const feedback = (textTokens["feedback"] ?? {}) as Record<string, { default?: unknown } | undefined>
-    const warn = asRgba(feedback.warning?.default) ?? asRgba(feedback.info?.default) ?? FALLBACK_ACCENT
-    const ok = asRgba(feedback.success?.default) ?? FALLBACK_ACCENT
-    const info = asRgba(feedback.info?.default) ?? FALLBACK_ACCENT
-    const accent = active(categorical[3] ?? categorical[0])
+    const warn = asRgba(feedback.warning?.default) ?? asRgba(feedback.info?.default) ?? FALLBACK_WARN
+    const ok = asRgba(feedback.success?.default) ?? FALLBACK_OK
+    const info = asRgba(feedback.info?.default) ?? FALLBACK_INFO
+    const accent = active(categorical[3] ?? categorical[0]) ?? FALLBACK_ACCENT
     const background =
       asRgba(tokens.background?.["default"]) ??
       asRgba(tokens.background?.["base"]) ??
@@ -89,7 +92,7 @@ export function resolvePalette(theme: unknown, mode: "dark" | "light"): DiagramP
       border,
       dim,
       accent,
-      accent2: active(categorical[0] ?? categorical[3]),
+      accent2: active(categorical[0] ?? categorical[3]) ?? FALLBACK_ACCENT2,
       activeBg,
       warn,
       ok,
