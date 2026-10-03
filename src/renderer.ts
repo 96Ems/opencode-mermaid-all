@@ -1,4 +1,6 @@
-import type { MarkdownCodeBlockRenderer, RenderContext } from "@opentui/core"
+import { TextRenderable, type MarkdownCodeBlockRenderer, type RenderContext } from "@opentui/core"
+import { animateGrid, readAnimationOptions } from "./animation.js"
+import { Grid } from "./core/grid.js"
 import { createMermaidCodeBlockRenderer } from "../vendor/merman/markdown.js"
 import { findFamily } from "./families/index.js"
 import { resolvePalette, type DiagramPalette } from "./palette.js"
@@ -44,6 +46,22 @@ function vendoredColors(palette: DiagramPalette): Record<string, unknown> {
 }
 
 /**
+ * The vendored engine returns a ready `TextRenderable` for the six native
+ * families. Rather than replace it (and lose its layout, style and scroll
+ * behaviour), we read its styled content back into a grid and animate that
+ * renderable in place.
+ */
+function animateVendored(renderable: unknown, palette: DiagramPalette): void {
+  if (!(renderable instanceof TextRenderable)) return
+  try {
+    const grid = Grid.fromStyledText(renderable.content)
+    animateGrid(renderable, grid, palette, readAnimationOptions())
+  } catch {
+    // Keep the static rendering if anything about the content is unexpected.
+  }
+}
+
+/**
  * Build the `mermaid` code-block renderer: the vendored OpenCode engine handles
  * flowchart/sequence/state/gantt/gitGraph/timeline, and the extra families here
  * handle everything else. Returning `undefined` falls back to the source block.
@@ -62,7 +80,14 @@ export function createMermaidAllRenderer(
 
   return (token, tokenContext) => {
     const handled = vendored(token, tokenContext)
-    if (handled) return handled
+    if (handled) {
+      try {
+        animateVendored(handled, resolvePalette(source().theme, source().mode))
+      } catch {
+        // Never let animation break the diagram itself.
+      }
+      return handled
+    }
 
     const family = findFamily(token.text)
     if (!family) return undefined
@@ -71,7 +96,9 @@ export function createMermaidAllRenderer(
     try {
       const canvas = family.render(token.text, { width: maxWidth })
       if (canvas.heightUsed() === 0) return undefined
-      return new DiagramRenderable(ctx, canvas, resolvePalette(source().theme, source().mode))
+      const palette = resolvePalette(source().theme, source().mode)
+      const grid = Grid.fromCanvas(canvas, palette)
+      return new DiagramRenderable(ctx, grid, palette)
     } catch {
       return undefined
     }

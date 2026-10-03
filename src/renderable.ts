@@ -1,41 +1,15 @@
-import { StyledText, TextRenderable, type RenderContext, type TextChunk } from "@opentui/core"
-import type { Canvas, StyleName } from "./core/canvas.js"
-import { colorFor, type DiagramPalette } from "./palette.js"
+import { TextRenderable, type RenderContext } from "@opentui/core"
+import { animateGrid } from "./animation.js"
+import { Grid } from "./core/grid.js"
+import type { DiagramPalette } from "./palette.js"
 
-export function canvasToStyledText(canvas: Canvas, palette: DiagramPalette): StyledText {
-  const chunks: TextChunk[] = []
-  const height = Math.max(1, canvas.heightUsed())
-  const width = Math.max(1, canvas.widthUsed())
-  for (let y = 0; y < height; y += 1) {
-    let run = ""
-    let style: StyleName | undefined
-    const flush = () => {
-      if (run.length === 0) return
-      chunks.push({ __isChunk: true, text: run, fg: colorFor(palette, style) } as TextChunk)
-      run = ""
-    }
-    for (let x = 0; x < width; x += 1) {
-      const cell = canvas.get(x, y)
-      const nextStyle = cell?.style
-      if (nextStyle !== style) {
-        flush()
-        style = nextStyle
-      }
-      run += cell && cell.ch !== "" ? cell.ch : " "
-    }
-    flush()
-    chunks.push({ __isChunk: true, text: "\n" } as TextChunk)
-  }
-  return new StyledText(chunks)
-}
-
-/** Horizontal-scrollable static diagram block, mirroring the built-in renderer. */
+/** Horizontal-scrollable diagram block, mirroring the built-in renderer. */
 export class DiagramRenderable extends TextRenderable {
-  constructor(ctx: RenderContext, canvas: Canvas, palette: DiagramPalette) {
+  constructor(ctx: RenderContext, grid: Grid, palette: DiagramPalette) {
     super(ctx, {
-      content: canvasToStyledText(canvas, palette),
+      content: grid.toStyledText(),
       width: "100%",
-      height: Math.max(1, canvas.heightUsed()),
+      height: Math.max(1, grid.heightUsed()),
       wrapMode: "none",
       selectable: false,
       marginTop: 1,
@@ -73,5 +47,6 @@ export class DiagramRenderable extends TextRenderable {
       event.preventDefault()
       event.stopPropagation()
     }
+    animateGrid(this, grid, palette)
   }
 }
