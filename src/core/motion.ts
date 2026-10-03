@@ -22,12 +22,21 @@ export interface WaveMotion {
   offset: number
 }
 
-export type Motion = FlowMotion | WaveMotion
+export type Motion = FlowMotion | WaveMotion | GlintMotion
+
+/** A slow blink on isolated markers (commits, points) when nothing else moves. */
+export interface GlintMotion {
+  kind: "glint"
+  cells: Point[]
+  period: number
+  offset: number
+}
 
 const HORIZONTAL = new Set("─━═┄┅╌╍┈┉╴╶╸╺")
 const VERTICAL = new Set("│┃║┆┇╎╏╵╷╹╻")
 const BARS = new Set("█▓▒░")
 const DOTS = new Set("•·")
+const GLINTS = new Set("●◉◎◆◇○")
 const CORNERS = new Set("╭╮╰╯┌┐└┘╔╗╚╝")
 const CORNER_TL = new Set("╭┌╔")
 const CORNER_TR = new Set("╮┐╗")
@@ -212,6 +221,19 @@ function collectBoxes(grid: Grid, motions: Motion[]): void {
   }
 }
 
+/** A slow blink on isolated markers, used for diagrams that have no lines/bars (e.g. gitGraph). */
+function collectGlints(grid: Grid, motions: Motion[]): void {
+  let count = 0
+  for (let y = 0; y < grid.h && count < 24; y += 1) {
+    for (let x = 0; x < grid.w && count < 24; x += 1) {
+      const ch = charAt(grid, x, y)
+      if (!GLINTS.has(ch)) continue
+      motions.push({ kind: "glint", cells: [{ x, y }], period: 1.6 + ((x * 7 + y * 3) % 10) * 0.12, offset: phaseFrom(x, y) })
+      count += 1
+    }
+  }
+}
+
 /** Derive a set of motion paths by reading the finished diagram grid. */
 export function collectMotions(grid: Grid): Motion[] {
   const motions: Motion[] = []
@@ -220,11 +242,25 @@ export function collectMotions(grid: Grid): Motion[] {
     collectDots(grid, motions)
     collectLines(grid, motions)
     collectBoxes(grid, motions)
+    // Diagrams whose only graphics are markers (gitGraph, sparse charts) still
+    // deserve some life.
+    if (motions.length === 0) collectGlints(grid, motions)
   } catch {
     return []
   }
   if (motions.length > MAX_MOTIONS) motions.length = MAX_MOTIONS
   return motions
+}
+
+/** Build a single comet that travels the given ordered path from start to end. */
+export function makeFlow(cells: Point[], offset = 0): FlowMotion {
+  const length = cells.length
+  return {
+    kind: "flow",
+    cells,
+    period: Math.max(1.4, Math.min(6, 1.2 + length * 0.045)),
+    offset: frac(offset),
+  }
 }
 
 const COMET = ["●", "•", "·"]
@@ -233,6 +269,15 @@ const WAVE = ["▓", "▒", "░"]
 /** Draw every motion at time `t` (seconds) onto a clone of the base grid. */
 export function applyMotions(grid: Grid, motions: Motion[], t: number, palette: DiagramPalette): void {
   for (const motion of motions) {
+    if (motion.kind === "glint") {
+      const point = motion.cells[0]
+      if (!point) continue
+      if (frac(t / motion.period + motion.offset) < 0.3) {
+        const base = grid.get(point.x, point.y)
+        grid.set(point.x, point.y, base?.ch === "◆" ? "◇" : base?.ch === "◎" ? "○" : "○", palette.accent)
+      }
+      continue
+    }
     const length = motion.cells.length
     if (length < 2) continue
     const phase = frac(t / motion.period + motion.offset)

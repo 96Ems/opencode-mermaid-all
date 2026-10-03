@@ -55,6 +55,34 @@ message → markdown code block ("mermaid")
   scroll on drag, like the built-in renderer).
 - `src/palette.ts` maps the host theme onto a small, defensive color palette.
 
+## Motion design
+
+Every diagram gets a subtle, comprehension-oriented animation, all of it driven
+from the same character grid (`src/core/grid.ts` + `src/core/motion.ts`) so it
+works for the hand-written families and the vendored engine alike:
+
+- **Flowcharts** — one comet per edge, travelling the edge's *real routed
+  polyline* from source to target (`flowchartRouteMotions`), so it follows the
+  arrows through every turn.
+- **Sequence / state / gantt / timeline** — a comet per connector, oriented by
+  the arrowhead.
+- **Bars and meters** (pie, xy, radar, sankey, journey) — a light band sweeps
+  along the bar.
+- **Boxes** (class, ER, C4, kanban, packet, …) — a slow comet travels the
+  perimeter.
+- **Markers without lines** (gitGraph commits, sparse points) — a slow blink.
+
+All diagrams share one throttled timer and a single `requestRender()` per frame,
+so an idle TUI stays idle and a screen full of diagrams costs one render pass.
+
+Tune it without touching the code:
+
+```sh
+MERMAID_ALL_ANIMATE=0    # disable animation entirely
+MERMAID_ALL_FPS=12       # 2..30, default 10
+MERMAID_ALL_SPEED=1.5    # 0.1..5, default 1
+```
+
 ## Install
 
 ```sh
