@@ -57,30 +57,33 @@ message → markdown code block ("mermaid")
 
 ## Motion design
 
-Every diagram gets a subtle, comprehension-oriented animation, all of it driven
-from the same character grid (`src/core/grid.ts` + `src/core/motion.ts`) so it
-works for the hand-written families and the vendored engine alike:
+Motion is **semantic and opt-in**, not inferred from characters that happen to
+look like lines or boxes:
 
-- **Flowcharts** — one comet per edge, travelling the edge's *real routed
-  polyline* from source to target (`flowchartRouteMotions`), so it follows the
-  arrows through every turn.
-- **Sequence / state / gantt / timeline** — a comet per connector, oriented by
-  the arrowhead.
-- **Bars and meters** (pie, xy, radar, sankey, journey) — a light band sweeps
-  along the bar.
-- **Boxes** (class, ER, C4, kanban, packet, …) — a slow comet travels the
-  perimeter.
-- **Markers without lines** (gitGraph commits, sparse points) — a slow blink.
+- **Flowcharts** — one dot per one-way routed edge, in source-to-arrow order.
+  Undirected and bidirectional edges stay still. The actual routed polyline is
+  used; labels and arrowheads are never overwritten. Short links are paced more
+  slowly, and nodes receive a subtle active tint as flow enters and leaves them.
+- **Sequence diagrams** — a dot follows each message arrow. Requests and
+  responses retain their own direction and color; self-messages follow the
+  loop.
+- **Sankey** — a dot follows each displayed left-to-right flow arrow.
+- **Data and structure diagrams** (pie, xychart, radar, quadrant, gantt,
+  gitGraph, state, class/ER/C4, mindmap, kanban, packet, …) stay static: moving
+  data points, schedules, commits or box borders would suggest meaning that
+  isn't in the source.
 
-All diagrams share one throttled timer and a single `requestRender()` per frame,
-so an idle TUI stays idle and a screen full of diagrams costs one render pass.
+Only a single dot is drawn. Its speed is bounded in terminal cells per second,
+it pauses briefly before restarting at the source, and unchanged frames are
+skipped. All active diagrams share one timer; off-screen blocks do no animation
+work, and the TUI is not put into continuous/live mode.
 
 Tune it without touching the code:
 
 ```sh
 MERMAID_ALL_ANIMATE=0    # disable animation entirely
-MERMAID_ALL_FPS=12       # 2..30, default 10
-MERMAID_ALL_SPEED=1.5    # 0.1..5, default 1
+MERMAID_ALL_FPS=20       # 2..30, default 20
+MERMAID_ALL_SPEED=1.2    # 0.1..2, default 1
 ```
 
 ## Install

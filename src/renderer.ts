@@ -1,14 +1,11 @@
 import { TextRenderable, type MarkdownCodeBlockRenderer, type RenderContext } from "@opentui/core"
 import { animateGrid, readAnimationOptions } from "./animation.js"
 import { Grid } from "./core/grid.js"
-import { makeFlow, type Motion, type Point } from "./core/motion.js"
+import type { Motion } from "./core/motion.js"
 import { createMermaidCodeBlockRenderer } from "../vendor/merman/markdown.js"
 import { detectMermaidDiagram } from "../vendor/merman/detect.js"
-import { drawFlowchartDiagramGrid } from "../vendor/merman/flowchart/drawing.js"
-import { layoutFlowchartDiagram } from "../vendor/merman/flowchart/layout.js"
-import { parseMermaidFlowchartDiagram } from "../vendor/merman/flowchart/parser.js"
-import { walkOrthogonalSegment } from "../vendor/merman/core/geometry.js"
 import { findFamily } from "./families/index.js"
+import { flowchartRouteMotions, sankeyRouteMotions, sequenceRouteMotions } from "./motion-design.js"
 import { resolvePalette, type DiagramPalette } from "./palette.js"
 import { DiagramRenderable } from "./renderable.js"
 
@@ -52,68 +49,16 @@ function vendoredColors(palette: DiagramPalette): Record<string, unknown> {
 }
 
 /**
- * Flowcharts get one comet per edge, travelling the edge's real routed
- * polyline from source to target. Animating each straight segment separately
- * looked like a ball bouncing left-right on every bar, which is exactly what
- * we want to avoid.
- */
-export function flowchartRouteMotions(source: string, ctxWidth: number): Motion[] | undefined {
-  try {
-    const layoutMaxWidth = Math.min(120, Math.max(1, Math.floor(ctxWidth)))
-    const options = { compact: true, layoutMaxWidth }
-    const grid = drawFlowchartDiagramGrid(parseMermaidFlowchartDiagram(source), options)
-    let trimTop = 0
-    for (let y = 0; y < grid.height; y += 1) {
-      let any = false
-      for (let x = 0; x < grid.width; x += 1) {
-        const cell = grid.getCell(x, y)
-        if (cell && cell.char.trim() !== "") {
-          any = true
-          break
-        }
-      }
-      if (any) break
-      trimTop += 1
-    }
-
-    const layout = layoutFlowchartDiagram(parseMermaidFlowchartDiagram(source), options)
-    const motions: Motion[] = []
-    layout.routes.forEach((route, index) => {
-      const points = route.points
-      if (!points || points.length < 2) return
-      const cells: Point[] = []
-      for (let i = 1; i < points.length; i += 1) {
-        walkOrthogonalSegment(points[i - 1]!, points[i]!, i === 1, (point) => {
-          cells.push({ x: point.x, y: point.y - trimTop })
-        })
-      }
-      const path: Point[] = []
-      for (const cell of cells) {
-        const last = path[path.length - 1]
-        if (!last || last.x !== cell.x || last.y !== cell.y) path.push(cell)
-      }
-      if (path.length < 2) return
-      if (route.edge.sourceArrowhead) path.reverse()
-      const seed = index * 0.19 + (points[0]?.x ?? 0) * 0.011 + (points[0]?.y ?? 0) * 0.017
-      motions.push(makeFlow(path, seed))
-    })
-    return motions.length > 0 ? motions : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * The vendored engine returns a ready `TextRenderable` for the six native
  * families. Rather than replace it (and lose its layout, style and scroll
  * behaviour), we read its styled content back into a grid and animate that
  * renderable in place.
  */
-function animateVendored(renderable: unknown, palette: DiagramPalette, motions?: Motion[]): void {
+function animateVendored(renderable: unknown, palette: DiagramPalette, motions: readonly Motion[]): void {
   if (!(renderable instanceof TextRenderable)) return
   try {
     const grid = Grid.fromStyledText(renderable.content)
-    animateGrid(renderable, grid, palette, readAnimationOptions(), motions)
+    animateGrid(renderable, grid, palette, motions, readAnimationOptions())
   } catch {
     // Keep the static rendering if anything about the content is unexpected.
   }
@@ -141,10 +86,13 @@ export function createMermaidAllRenderer(
     if (handled) {
       try {
         const palette = resolvePalette(source().theme, source().mode)
+        const kind = detectMermaidDiagram(token.text)
         const motions =
-          detectMermaidDiagram(token.text) === "flowchart"
+          kind === "flowchart"
             ? flowchartRouteMotions(token.text, ctx.width)
-            : undefined
+            : kind === "sequence"
+              ? sequenceRouteMotions(token.text)
+              : []
         animateVendored(handled, palette, motions)
       } catch {
         // Never let animation break the diagram itself.
@@ -161,7 +109,8 @@ export function createMermaidAllRenderer(
       if (canvas.heightUsed() === 0) return undefined
       const palette = resolvePalette(source().theme, source().mode)
       const grid = Grid.fromCanvas(canvas, palette)
-      return new DiagramRenderable(ctx, grid, palette)
+      const motions = family.name === "sankey" ? sankeyRouteMotions(token.text, canvas) : []
+      return new DiagramRenderable(ctx, grid, palette, motions)
     } catch {
       return undefined
     }

@@ -9,6 +9,8 @@ export interface DiagramPalette {
   dim: RGBA
   accent: RGBA
   accent2: RGBA
+  /** Opaque, low-contrast wash used while a flowchart node is active. */
+  activeBg?: RGBA
   warn: RGBA
   ok: RGBA
   info: RGBA
@@ -17,6 +19,7 @@ export interface DiagramPalette {
 const FALLBACK_TEXT = RGBA.fromInts(228, 239, 232, 255)
 const FALLBACK_MUTED = RGBA.fromInts(140, 166, 156, 255)
 const FALLBACK_ACCENT = RGBA.fromInts(134, 225, 200, 255)
+const FALLBACK_ACTIVE_BG = RGBA.fromInts(29, 52, 46, 255)
 
 function asRgba(value: unknown): RGBA | undefined {
   return value instanceof RGBA ? value : undefined
@@ -29,6 +32,7 @@ const FALLBACK_PALETTE: DiagramPalette = {
   dim: FALLBACK_MUTED,
   accent: FALLBACK_ACCENT,
   accent2: FALLBACK_ACCENT,
+  activeBg: FALLBACK_ACTIVE_BG,
   warn: FALLBACK_ACCENT,
   ok: FALLBACK_ACCENT,
   info: FALLBACK_ACCENT,
@@ -43,6 +47,7 @@ export function resolvePalette(theme: unknown, mode: "dark" | "light"): DiagramP
   try {
     const tokens = (theme ?? {}) as {
       text?: Record<string, unknown>
+      background?: Record<string, unknown>
       categorical?: unknown
     }
     const textTokens = tokens.text ?? {}
@@ -70,14 +75,22 @@ export function resolvePalette(theme: unknown, mode: "dark" | "light"): DiagramP
     const warn = asRgba(feedback.warning?.default) ?? asRgba(feedback.info?.default) ?? FALLBACK_ACCENT
     const ok = asRgba(feedback.success?.default) ?? FALLBACK_ACCENT
     const info = asRgba(feedback.info?.default) ?? FALLBACK_ACCENT
+    const accent = active(categorical[3] ?? categorical[0])
+    const background =
+      asRgba(tokens.background?.["default"]) ??
+      asRgba(tokens.background?.["base"]) ??
+      (mode === "dark" ? RGBA.fromInts(12, 18, 16, 255) : RGBA.fromInts(255, 255, 255, 255))
+    const activeBlend = blendColor(background, accent, mode === "dark" ? 0.24 : 0.1) ?? FALLBACK_ACTIVE_BG
+    const activeBg = RGBA.fromInts(activeBlend.r, activeBlend.g, activeBlend.b, 255)
 
     return {
       text,
       muted,
       border,
       dim,
-      accent: active(categorical[3] ?? categorical[0]),
+      accent,
       accent2: active(categorical[0] ?? categorical[3]),
+      activeBg,
       warn,
       ok,
       info,

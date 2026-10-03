@@ -1,308 +1,193 @@
-import type { Grid } from "./grid.js"
+import { RGBA } from "@opentui/core"
 import type { DiagramPalette } from "../palette.js"
+import type { Grid } from "./grid.js"
 
 export interface Point {
   x: number
   y: number
 }
 
-/** A single highlight travelling along an ordered list of cells (left→right, top→bottom, or around a box). */
 export interface FlowMotion {
   kind: "flow"
+  /** Ordered source-to-target route cells. */
   cells: Point[]
+  /** Time spent travelling the route, before pausing at the destination. */
+  travelDuration: number
+  /** Full travel + pause cycle duration. */
   period: number
-  offset: number
+  destinationPause: number
+  /** Delay before the first journey starts; unlike phase offsets, this keeps the dot at the source. */
+  delay: number
+  tone: "accent" | "accent2" | "info"
+  highlights: NodeHighlight[]
 }
 
-/** A light band sweeping along a solid block run (bars, meters). */
-export interface WaveMotion {
-  kind: "wave"
-  cells: Point[]
-  period: number
-  offset: number
+export interface NodeHighlightCell extends Point {
+  kind: "fill" | "ink"
 }
 
-export type Motion = FlowMotion | WaveMotion | GlintMotion
-
-/** A slow blink on isolated markers (commits, points) when nothing else moves. */
-export interface GlintMotion {
-  kind: "glint"
-  cells: Point[]
-  period: number
-  offset: number
+export interface NodeHighlight {
+  cells: NodeHighlightCell[]
+  start: number
+  end: number
 }
 
-const HORIZONTAL = new Set("─━═┄┅╌╍┈┉╴╶╸╺")
-const VERTICAL = new Set("│┃║┆┇╎╏╵╷╹╻")
-const BARS = new Set("█▓▒░")
-const DOTS = new Set("•·")
-const GLINTS = new Set("●◉◎◆◇○")
-const CORNERS = new Set("╭╮╰╯┌┐└┘╔╗╚╝")
-const CORNER_TL = new Set("╭┌╔")
-const CORNER_TR = new Set("╮┐╗")
-const CORNER_BL = new Set("╰└╚")
-const CORNER_BR = new Set("╯┘╝")
-const ARROW_R = new Set("►▶→⟶>")
-const ARROW_L = new Set("◄◀←⟵<")
-const ARROW_D = new Set("▼↓")
-const ARROW_U = new Set("▲↑")
+export type Motion = FlowMotion
 
-const MIN_LINE = 3
-const MIN_DOT = 2
-const MAX_MOTIONS = 48
-const MAX_BOXES = 8
-
-function charAt(grid: Grid, x: number, y: number): string {
-  const cell = grid.get(x, y)
-  return cell && cell.ch !== "" ? cell.ch : ""
+export interface MotionMarker extends Point {
+  tone: FlowMotion["tone"]
+  kind: "dot" | "arrowhead"
 }
 
-function frac(value: number): number {
-  return value - Math.floor(value)
+export interface MotionFrame {
+  key: string
+  markers: MotionMarker[]
+  highlights: NodeHighlightCell[]
 }
 
-function phaseFrom(x: number, y: number): number {
-  return frac(x * 0.137 + y * 0.291)
+export interface FlowTiming {
+  cellsPerSecond?: number
+  minimumDuration?: number
+  destinationPause?: number
 }
 
-function pushFlow(motions: Motion[], cells: Point[], axis: "h" | "v", before: string, after: string, x: number, y: number): void {
-  if (cells.length < MIN_LINE) return
-  // The arrowhead is drawn at the target, so a left/up arrowhead means the
-  // connector actually flows right-to-left / bottom-to-top.
-  const reverse =
-    axis === "h" ? ARROW_L.has(after) || ARROW_L.has(before) : ARROW_U.has(after) || ARROW_U.has(before)
-  const ordered = reverse ? [...cells].reverse() : cells
-  const length = ordered.length
-  motions.push({
-    kind: "flow",
-    cells: ordered,
-    period: Math.max(0.9, Math.min(5, 0.9 + length * 0.14)),
-    offset: phaseFrom(x, y),
-  })
+const FLOW_CELLS_PER_SECOND = 6
+const MINIMUM_TRAVEL_SECONDS = 0.24
+const DESTINATION_PAUSE_SECONDS = 0.8
+const FLOW_TRACK_GLYPHS = new Set("─━═│┃║┆┇╎╏┄┅┈┉╌╍╴╶╸╺╭╮╰╯┌┐└┘├┤┬┴┼┏┓┗┛┣┫┳┻╋╔╗╚╝╠╣╦╩╬")
+const FLOW_ARROW_GLYPHS = new Set("►◄▼▲▶◀→←↓↑⟶⟵")
+
+export function isFlowTrackGlyph(char: string): boolean {
+  return FLOW_TRACK_GLYPHS.has(char)
 }
 
-function collectLines(grid: Grid, motions: Motion[]): void {
-  // Horizontal runs.
-  for (let y = 0; y < grid.h; y += 1) {
-    let x = 0
-    while (x < grid.w) {
-      if (!HORIZONTAL.has(charAt(grid, x, y))) {
-        x += 1
-        continue
-      }
-      const start = x
-      while (x < grid.w && HORIZONTAL.has(charAt(grid, x, y))) x += 1
-      const end = x - 1
-      const before = charAt(grid, start - 1, y)
-      const after = charAt(grid, end + 1, y)
-      if (CORNERS.has(before) && CORNERS.has(after)) continue
-      const cells: Point[] = []
-      for (let cx = start; cx <= end; cx += 1) cells.push({ x: cx, y })
-      pushFlow(motions, cells, "h", before, after, start, y)
-    }
-  }
-  // Vertical runs.
-  for (let x = 0; x < grid.w; x += 1) {
-    let y = 0
-    while (y < grid.h) {
-      if (!VERTICAL.has(charAt(grid, x, y))) {
-        y += 1
-        continue
-      }
-      const start = y
-      while (y < grid.h && VERTICAL.has(charAt(grid, x, y))) y += 1
-      const end = y - 1
-      const before = charAt(grid, x, start - 1)
-      const after = charAt(grid, x, end + 1)
-      if (CORNERS.has(before) && CORNERS.has(after)) continue
-      const cells: Point[] = []
-      for (let cy = start; cy <= end; cy += 1) cells.push({ x, y: cy })
-      pushFlow(motions, cells, "v", before, after, x, start)
-    }
-  }
+export function isFlowArrowGlyph(char: string): boolean {
+  return FLOW_ARROW_GLYPHS.has(char)
 }
 
-function collectDots(grid: Grid, motions: Motion[]): void {
-  for (let y = 0; y < grid.h; y += 1) {
-    let x = 0
-    while (x < grid.w) {
-      if (!DOTS.has(charAt(grid, x, y))) {
-        x += 1
-        continue
-      }
-      const start = x
-      while (x < grid.w && DOTS.has(charAt(grid, x, y))) x += 1
-      const end = x - 1
-      if (end - start + 1 < MIN_DOT) continue
-      const cells: Point[] = []
-      for (let cx = start; cx <= end; cx += 1) cells.push({ x: cx, y })
-      motions.push({
-        kind: "flow",
-        cells,
-        period: Math.max(1, Math.min(4, 0.8 + cells.length * 0.2)),
-        offset: phaseFrom(start, y),
-      })
-    }
-  }
-}
-
-function collectBars(grid: Grid, motions: Motion[]): void {
-  const claimed = new Set<number>()
-  const claim = (point: Point) => claimed.add(point.y * grid.w + point.x)
-  const isClaimed = (x: number, y: number) => claimed.has(y * grid.w + x)
-
-  // Horizontal bars first, so a row of block art wins over accidental columns
-  // that only line up because several horizontal bars share the same columns.
-  for (let y = 0; y < grid.h; y += 1) {
-    let x = 0
-    while (x < grid.w) {
-      if (!BARS.has(charAt(grid, x, y))) {
-        x += 1
-        continue
-      }
-      const start = x
-      while (x < grid.w && BARS.has(charAt(grid, x, y))) x += 1
-      const end = x - 1
-      if (end - start + 1 < MIN_LINE) continue
-      const cells: Point[] = []
-      for (let cx = start; cx <= end; cx += 1) cells.push({ x: cx, y })
-      cells.forEach(claim)
-      motions.push({ kind: "wave", cells, period: Math.max(2.2, Math.min(8, 1.6 + cells.length * 0.22)), offset: phaseFrom(start, y) })
-    }
-  }
-  // Vertical bars (e.g. xychart columns) that were not already covered.
-  for (let x = 0; x < grid.w; x += 1) {
-    let y = 0
-    while (y < grid.h) {
-      if (!BARS.has(charAt(grid, x, y)) || isClaimed(x, y)) {
-        y += 1
-        continue
-      }
-      const start = y
-      while (y < grid.h && BARS.has(charAt(grid, x, y)) && !isClaimed(x, y)) y += 1
-      const end = y - 1
-      if (end - start + 1 < MIN_LINE) continue
-      const cells: Point[] = []
-      for (let cy = start; cy <= end; cy += 1) cells.push({ x, y: cy })
-      cells.forEach(claim)
-      motions.push({ kind: "wave", cells, period: Math.max(2.2, Math.min(8, 1.6 + cells.length * 0.22)), offset: phaseFrom(x, start) })
-    }
-  }
-}
-
-function collectBoxes(grid: Grid, motions: Motion[]): void {
-  let count = 0
-  for (let y = 0; y < grid.h && count < MAX_BOXES; y += 1) {
-    for (let x = 0; x < grid.w && count < MAX_BOXES; x += 1) {
-      if (!CORNER_TL.has(charAt(grid, x, y))) continue
-      let right = x + 1
-      while (right < grid.w && HORIZONTAL.has(charAt(grid, right, y))) right += 1
-      if (right <= x + 2 || !CORNER_TR.has(charAt(grid, right, y))) continue
-      let bottom = y + 1
-      while (bottom < grid.h && VERTICAL.has(charAt(grid, x, bottom))) bottom += 1
-      if (bottom <= y + 2 || !CORNER_BL.has(charAt(grid, x, bottom))) continue
-      if (!CORNER_BR.has(charAt(grid, right, bottom))) continue
-      if (right - x > 100 || bottom - y > 60) continue
-
-      const cells: Point[] = []
-      for (let cx = x; cx <= right; cx += 1) cells.push({ x: cx, y })
-      for (let cy = y + 1; cy <= bottom; cy += 1) cells.push({ x: right, y: cy })
-      for (let cx = right - 1; cx >= x; cx -= 1) cells.push({ x: cx, y: bottom })
-      for (let cy = bottom - 1; cy > y; cy -= 1) cells.push({ x, y: cy })
-
-      motions.push({
-        kind: "flow",
-        cells,
-        period: Math.max(4, Math.min(12, 4 + cells.length * 0.05)),
-        offset: phaseFrom(x, y),
-      })
-      count += 1
-    }
-  }
-}
-
-/** A slow blink on isolated markers, used for diagrams that have no lines/bars (e.g. gitGraph). */
-function collectGlints(grid: Grid, motions: Motion[]): void {
-  let count = 0
-  for (let y = 0; y < grid.h && count < 24; y += 1) {
-    for (let x = 0; x < grid.w && count < 24; x += 1) {
-      const ch = charAt(grid, x, y)
-      if (!GLINTS.has(ch)) continue
-      motions.push({ kind: "glint", cells: [{ x, y }], period: 1.6 + ((x * 7 + y * 3) % 10) * 0.12, offset: phaseFrom(x, y) })
-      count += 1
-    }
-  }
-}
-
-/** Derive a set of motion paths by reading the finished diagram grid. */
-export function collectMotions(grid: Grid): Motion[] {
-  const motions: Motion[] = []
-  try {
-    collectBars(grid, motions)
-    collectDots(grid, motions)
-    collectLines(grid, motions)
-    collectBoxes(grid, motions)
-    // Diagrams whose only graphics are markers (gitGraph, sparse charts) still
-    // deserve some life.
-    if (motions.length === 0) collectGlints(grid, motions)
-  } catch {
-    return []
-  }
-  if (motions.length > MAX_MOTIONS) motions.length = MAX_MOTIONS
-  return motions
-}
-
-/** Build a single comet that travels the given ordered path from start to end. */
-export function makeFlow(cells: Point[], offset = 0): FlowMotion {
-  const length = cells.length
+/** Create a steady one-way flow. Timing is based on route length, not a capped loop. */
+export function makeFlow(
+  cells: Point[],
+  delay = 0,
+  tone: FlowMotion["tone"] = "accent",
+  timing: FlowTiming = {},
+): FlowMotion {
+  const destinationPause = timing.destinationPause ?? DESTINATION_PAUSE_SECONDS
+  const travelDuration = Math.max(
+    timing.minimumDuration ?? MINIMUM_TRAVEL_SECONDS,
+    (cells.length - 1) / (timing.cellsPerSecond ?? FLOW_CELLS_PER_SECOND),
+  )
   return {
     kind: "flow",
     cells,
-    period: Math.max(1.4, Math.min(6, 1.2 + length * 0.045)),
-    offset: frac(offset),
+    travelDuration,
+    period: travelDuration + destinationPause,
+    destinationPause,
+    delay: Math.max(0, delay),
+    tone,
+    highlights: [],
   }
 }
 
-const COMET = ["●", "•", "·"]
-const WAVE = ["▓", "▒", "░"]
+/**
+ * Draw only the semantic flow marker. Text, arrowheads and boxes are never
+ * overwritten—even when a routed path crosses an edge label.
+ *
+ * Returns the rendered marker set so the shared animation loop can skip an
+ * unchanged frame instead of asking OpenTUI to paint the same cells again.
+ */
+export function resolveMotionFrame(base: Grid, motions: readonly Motion[], seconds: number): MotionFrame {
+  const rendered = new Map<number, MotionMarker>()
+  const highlighted = new Map<number, NodeHighlightCell>()
 
-/** Draw every motion at time `t` (seconds) onto a clone of the base grid. */
-export function applyMotions(grid: Grid, motions: Motion[], t: number, palette: DiagramPalette): void {
   for (const motion of motions) {
-    if (motion.kind === "glint") {
-      const point = motion.cells[0]
-      if (!point) continue
-      if (frac(t / motion.period + motion.offset) < 0.3) {
-        const base = grid.get(point.x, point.y)
-        grid.set(point.x, point.y, base?.ch === "◆" ? "◇" : base?.ch === "◎" ? "○" : "○", palette.accent)
-      }
-      continue
-    }
     const length = motion.cells.length
-    if (length < 2) continue
-    const phase = frac(t / motion.period + motion.offset)
-    const head = Math.min(length - 1, Math.floor(phase * length))
+    if (length < 2 || motion.travelDuration <= 0 || motion.period <= 0) continue
 
-    if (motion.kind === "wave") {
-      const radius = length >= 12 ? 1 : 0
-      for (let d = -radius; d <= radius; d += 1) {
-        const index = head + d
-        if (index < 0 || index >= length) continue
-        const point = motion.cells[index]
-        if (!point) continue
-        const base = grid.get(point.x, point.y)
-        grid.set(point.x, point.y, d === 0 ? WAVE[0] : WAVE[1], base?.fg ?? palette.accent)
+    const elapsed = seconds - motion.delay
+    if (elapsed < 0) continue
+    const cycleTime = elapsed % motion.period
+
+    if (cycleTime <= motion.travelDuration) {
+      const progress = Math.min(1, cycleTime / motion.travelDuration)
+      const index = Math.min(length - 1, Math.round(progress * (length - 1)))
+      const point = motion.cells[index]
+      if (point) {
+        const baseCell = base.get(point.x, point.y)
+        if (baseCell && (isFlowTrackGlyph(baseCell.ch) || isFlowArrowGlyph(baseCell.ch))) {
+          const cellKey = point.y * base.w + point.x
+          if (!rendered.has(cellKey)) {
+            rendered.set(cellKey, {
+              ...point,
+              tone: motion.tone,
+              kind: isFlowArrowGlyph(baseCell.ch) ? "arrowhead" : "dot",
+            })
+          }
+        }
       }
-      continue
     }
 
-    for (let k = 0; k < COMET.length; k += 1) {
-      const index = head - k
-      if (index < 0) break
-      const point = motion.cells[index]
-      if (!point) continue
-      const color = k === 0 ? palette.accent : k === 1 ? palette.accent2 : palette.dim
-      grid.set(point.x, point.y, COMET[k], color)
+    for (const effect of motion.highlights) {
+      if (cycleTime < effect.start || cycleTime >= effect.end) continue
+      for (const cell of effect.cells) {
+        const cellKey = cell.y * base.w + cell.x
+        const current = highlighted.get(cellKey)
+        if (!current || (current.kind === "fill" && cell.kind === "ink")) highlighted.set(cellKey, cell)
+      }
     }
   }
+
+  const markers = [...rendered.entries()].sort(([left], [right]) => left - right).map(([, marker]) => marker)
+  const highlights = [...highlighted.entries()].sort(([left], [right]) => left - right).map(([, cell]) => cell)
+  const markerKey = markers
+    .map((marker) => `${marker.y * base.w + marker.x}:${marker.tone}:${marker.kind}`)
+    .join(";")
+  const highlightKey = highlights.map((cell) => `${cell.y * base.w + cell.x}:${cell.kind}`).join(";")
+  const key = markerKey || highlightKey ? `m:${markerKey}|h:${highlightKey}` : ""
+  return { key, markers, highlights }
+}
+
+export function applyMotionFrame(
+  grid: Grid,
+  markers: readonly MotionMarker[],
+  palette: DiagramPalette,
+  highlights: readonly NodeHighlightCell[] = [],
+): void {
+  const bg =
+    palette.activeBg ??
+    RGBA.fromInts(
+      Math.round(palette.accent.r * 0.22),
+      Math.round(palette.accent.g * 0.22),
+      Math.round(palette.accent.b * 0.22),
+      255,
+    )
+  for (const highlight of highlights) {
+    const cell = grid.get(highlight.x, highlight.y)
+    if (!cell) continue
+    grid.set(
+      highlight.x,
+      highlight.y,
+      cell.ch,
+      highlight.kind === "ink" ? palette.accent : cell.fg,
+      bg,
+      cell.attributes,
+    )
+  }
+  for (const marker of markers) {
+    const cell = grid.get(marker.x, marker.y)
+    grid.set(
+      marker.x,
+      marker.y,
+      marker.kind === "dot" ? "●" : (cell?.ch ?? "●"),
+      palette[marker.tone],
+      cell?.bg,
+      cell?.attributes,
+    )
+  }
+}
+
+export function applyMotions(grid: Grid, motions: readonly Motion[], seconds: number, palette: DiagramPalette): string {
+  const frame = resolveMotionFrame(grid, motions, seconds)
+  applyMotionFrame(grid, frame.markers, palette, frame.highlights)
+  return frame.key
 }

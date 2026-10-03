@@ -1,6 +1,7 @@
 import { RGBA } from "@opentui/core"
 import { Grid } from "../src/core/grid.js"
-import { applyMotions, collectMotions } from "../src/core/motion.js"
+import { applyMotions } from "../src/core/motion.js"
+import { sankeyRouteMotions } from "../src/motion-design.js"
 import type { DiagramPalette } from "../src/palette.js"
 import { findFamily } from "../src/families/index.js"
 
@@ -17,87 +18,34 @@ const palette: DiagramPalette = {
 }
 
 const samples: Record<string, string> = {
+  sankey: `sankey-beta
+A,B,10
+A,C,5
+B,D,8`,
   pie: `pie showData
     title Languages
     "TypeScript" : 55
     "Python" : 25
     "Go" : 20`,
-  xychart: `xychart-beta
-    title "Sales"
-    x-axis [jan, feb, mar, apr]
-    y-axis "Units" 0 --> 100
-    bar [30, 60, 90, 70]
-    line [25, 55, 85, 65]`,
-  radar: `radar-beta
-    axis a["Speed"], b["Cost"], c["Quality"]
-    curve x["Option A"]{1, 2, 3}
-    curve y["Option B"]{3, 1, 2}
-    max 4`,
-  quadrant: `quadrantChart
-    title Priorities
-    x-axis Low effort --> High effort
-    y-axis Low impact --> High impact
-    quadrant-1 Quick wins
-    quadrant-3 Skip
-    Task A: [0.3, 0.8]
-    Task B: [0.7, 0.4]`,
-  sankey: `sankey-beta
-A,B,10
-A,C,5
-B,D,8`,
-  packet: `packet-beta
-0-7: "Version"
-8-15: "IHL"
-16-31: "Total Length"
-32-47: "Identification"`,
-  classDiagram: `classDiagram
-    class Animal {
-        +String name
-        +int age
-    }
-    class Dog
-    Animal <|-- Dog : extends`,
   kanban: `kanban
   Todo
     [Create docs]
     [Write tests]
   Doing
-    [Implement API]
-  Done
-    [Setup]`,
+    [Implement API]`,
 }
 
-const at = (grid: Grid, t: number): string => {
-  const frame = grid.clone()
-  applyMotions(frame, collectMotions(grid), t, palette)
-  return frame.toStyledText().chunks.map((c) => c.text).join("")
-}
-
-let failures = 0
 for (const [name, source] of Object.entries(samples)) {
   const family = findFamily(source)
-  console.log(`\n======== ${name} -> ${family?.name ?? "NO MATCH"} ========`)
-  if (!family) {
-    failures += 1
-    continue
-  }
-  try {
-    const canvas = family.render(source, { width: 90 })
-    const grid = Grid.fromCanvas(canvas, palette)
-    const motions = collectMotions(grid)
-    console.log(`motions: ${motions.length} (${[...new Set(motions.map((m) => m.kind))].join(",")})`)
-    if (motions.length === 0) {
-      failures += 1
-      console.log("(NO MOTION)")
-    }
-    for (const t of [0, 0.7, 1.6]) {
-      console.log(`\n--- frame t=${t}s ---`)
-      console.log(at(grid, t))
-    }
-  } catch (error) {
-    failures += 1
-    console.log("ERROR:", error instanceof Error ? error.message : String(error))
+  if (!family) throw new Error(`${name}: no family matched`)
+  const canvas = family.render(source, { width: 90 })
+  const base = Grid.fromCanvas(canvas, palette)
+  const motions = name === "sankey" ? sankeyRouteMotions(source, canvas) : []
+  console.log(`\n======== ${name}: ${motions.length ? `${motions.length} semantic flows` : "static by design"} ========`)
+  for (const seconds of [0, 0.7, 1.4]) {
+    const frame = base.clone()
+    applyMotions(frame, motions, seconds, palette)
+    console.log(`\n--- t=${seconds.toFixed(1)}s ---`)
+    console.log(frame.toStyledText().chunks.map((chunk) => chunk.text).join(""))
   }
 }
-
-console.log(`\n${failures === 0 ? "ALL OK" : `${failures} FAILURE(S)`}`)

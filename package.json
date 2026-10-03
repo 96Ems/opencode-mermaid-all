@@ -11,7 +11,7 @@
     "url": "https://github.com/96Ems/opencode-mermaid-all"
   },
   "scripts": {
-    "test": "bun test/render.ts"
+    "test": "bun test/render.ts && bun test/motion-quality.ts && bun test/flowchart-activation.ts && bun test/host.ts"
   },
   "dependencies": {
     "entities": "7.0.1",

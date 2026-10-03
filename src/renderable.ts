@@ -1,11 +1,12 @@
 import { TextRenderable, type RenderContext } from "@opentui/core"
 import { animateGrid } from "./animation.js"
 import { Grid } from "./core/grid.js"
+import type { Motion } from "./core/motion.js"
 import type { DiagramPalette } from "./palette.js"
 
 /** Horizontal-scrollable diagram block, mirroring the built-in renderer. */
 export class DiagramRenderable extends TextRenderable {
-  constructor(ctx: RenderContext, grid: Grid, palette: DiagramPalette) {
+  constructor(ctx: RenderContext, grid: Grid, palette: DiagramPalette, motions: readonly Motion[] = []) {
     super(ctx, {
       content: grid.toStyledText(),
       width: "100%",
@@ -47,6 +48,6 @@ export class DiagramRenderable extends TextRenderable {
       event.preventDefault()
       event.stopPropagation()
     }
-    animateGrid(this, grid, palette)
+    animateGrid(this, grid, palette, motions)
   }
 }

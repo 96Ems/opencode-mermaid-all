@@ -1,7 +1,7 @@
+import { strict as assert } from "node:assert"
 import { createTestRenderer } from "@opentui/core/testing"
 import { createMermaidAllRenderer } from "../src/renderer.js"
 import { activeAnimationCount } from "../src/animation.js"
-import { findFamily } from "../src/families/index.js"
 
 const samples: Record<string, string> = {
   flowchart: `flowchart TD
@@ -66,52 +66,43 @@ A,C,5
 B,D,8`,
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
+const animated = new Set(["flowchart", "sequence", "sankey"])
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 110, height: 36 })
 const render = createMermaidAllRenderer(renderer, () => ({ theme: undefined, mode: "dark" }))
 
-let failures = 0
 for (const [name, source] of Object.entries(samples)) {
   console.log(`\n======== ${name} ========`)
-  try {
-    const node = render({ text: source } as never, { defaultRender: () => ({ id: `block-${name}` }) } as never)
-    if (!node) {
-      failures += 1
-      console.log("renderer returned undefined")
-      continue
-    }
-    renderer.root.add(node as never)
-    const animated = activeAnimationCount() > 0
-    await renderOnce()
-    const first = captureCharFrame()
-    await sleep(420)
-    await renderOnce()
-    const second = captureCharFrame()
-    renderer.root.remove(node as never)
-    ;(node as { destroy?: () => void }).destroy?.()
+  const node = render({ text: source } as never, { defaultRender: () => ({ id: `block-${name}` }) } as never)
+  assert.ok(node, `${name}: renderer returns a diagram`)
+  renderer.root.add(node as never)
 
-    const firstLines = first.split("\n")
-    const hasArt = firstLines.some((line) => /[\u2500-\u257f\u2580-\u259f\u25a0-\u25ff]/.test(line))
-    let changed = 0
-    const height = Math.max(firstLines.length, second.split("\n").length)
-    for (let i = 0; i < height; i += 1) {
-      const a = first.split("\n")[i] ?? ""
-      const b = second.split("\n")[i] ?? ""
-      for (let x = 0; x < Math.max(a.length, b.length); x += 1) if (a[x] !== b[x]) changed += 1
-    }
-    const custom = findFamily(source)?.name ?? "vendored"
-    console.log(`handler=${custom} art=${hasArt} cellsChanged=${changed} animatedJobs=${animated}`)
-    if (!hasArt || changed === 0) {
-      failures += 1
-      console.log("---- frame ----")
-      console.log(first.split("\n").slice(0, 24).join("\n"))
-    }
-  } catch (error) {
-    failures += 1
-    console.log("ERROR:", error instanceof Error ? error.stack ?? error.message : String(error))
+  const shouldAnimate = animated.has(name)
+  assert.equal(activeAnimationCount() > 0, shouldAnimate, `${name}: animation is intentional`)
+  await renderOnce()
+  const first = captureCharFrame()
+  await sleep(500)
+  await renderOnce()
+  const second = captureCharFrame()
+  renderer.root.remove(node as never)
+  ;(node as { destroy?: () => void }).destroy?.()
+
+  const firstLines = first.split("\n")
+  const hasArt = firstLines.some((line) => /[\u2500-\u257f\u2580-\u259f\u25a0-\u25ff]/.test(line))
+  assert.ok(hasArt, `${name}: diagram renders in OpenTUI`)
+  let changed = 0
+  const secondLines = second.split("\n")
+  for (let row = 0; row < Math.max(firstLines.length, secondLines.length); row += 1) {
+    const a = firstLines[row] ?? ""
+    const b = secondLines[row] ?? ""
+    for (let col = 0; col < Math.max(a.length, b.length); col += 1) if (a[col] !== b[col]) changed += 1
   }
+
+  if (shouldAnimate) assert.ok(changed > 0, `${name}: meaningful flow motion advances in the host`)
+  else assert.equal(changed, 0, `${name}: static diagram remains still`)
+  console.log(`art=${hasArt} changedCells=${changed} shouldAnimate=${shouldAnimate}`)
 }
 
-console.log(`\n${failures === 0 ? "ALL OK" : `${failures} FAILURE(S)`}`)
-process.exit(failures === 0 ? 0 : 1)
+assert.equal(activeAnimationCount(), 0, "destroyed diagrams leave no animation jobs")
+console.log("\nALL OK")
+process.exit(0)
